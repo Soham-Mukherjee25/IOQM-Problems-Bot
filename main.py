@@ -63,17 +63,17 @@ async def user_count(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def new_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a random IOQM question picture."""
     try:
-        question_files = os.listdir('questions')
+        question_files = os.listdir('question')
         if not question_files:
             await update.message.reply_text("Sorry, I can't find any questions right now. Please check back later.")
             return
 
         random_question_file = random.choice(question_files)
-        file_path = os.path.join('questions', random_question_file)
+        file_path = os.path.join('question', random_question_file)
         await update.message.reply_photo(photo=open(file_path, 'rb'), caption="Here is your IOQM problem. Good luck!")
 
     except FileNotFoundError:
-        await update.message.reply_text("The 'questions' folder was not found. Please make sure it exists and contains question images.")
+        await update.message.reply_text("The 'question' folder was not found. Please make sure it exists and contains question images.")
     except Exception as e:
         print(f"An error occurred: {e}")
         await update.message.reply_text("An error occurred while fetching a new problem.")
