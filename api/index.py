@@ -10,26 +10,33 @@ app = Flask(__name__)
 # --- Secrets ---
 TELEGRAM_TOKEN = os.environ['TELEGRAM_TOKEN']
 
+# Global bot application
 ptb_app = None
 
 async def initialize_bot():
+    """Initializes the bot application."""
     global ptb_app
     ptb_app = Application.builder().token(TELEGRAM_TOKEN).build()
+    
+    # Add handlers
     ptb_app.add_handler(CommandHandler("start", start))
     ptb_app.add_handler(CommandHandler("new_problem", new_problem))
+    
     await ptb_app.initialize()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends the welcome message."""
     welcome_message = (
         "Welcome to the IOQM Problems Bot! \n\n"
-        "I'm here to help you prepare for the Indian Olympiad Qualifier in Mathematics. "
+        "I'm here to help you prepare for the Indian Olympiad Qualifier in Mathematics. \n"
         "Use the /new_problem command to get a random question."
     )
     await update.message.reply_text(welcome_message)
 
 async def new_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends a random IOQM question picture."""
     try:
-        # Look one directory up (..) to find the 'question' folder
+        # We need to look one directory up because this script is in /api/
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         question_dir = os.path.join(base_dir, 'question')
         
@@ -53,6 +60,7 @@ async def new_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 @app.route('/', methods=['POST'])
 def webhook_handler():
+    """Handles incoming Telegram updates."""
     if request.method == "POST":
         asyncio.run(process_update())
         return "OK"
@@ -62,6 +70,6 @@ async def process_update():
     global ptb_app
     if ptb_app is None:
         await initialize_bot()
-    
+        
     update = Update.de_json(request.get_json(force=True), ptb_app.bot)
     await ptb_app.process_update(update)
