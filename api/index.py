@@ -49,20 +49,29 @@ async def new_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         random_question_file = random.choice(question_files)
         file_path = os.path.join(question_dir, random_question_file)
         
+        # INCREASED TIMEOUTS: Gives the bot 60 seconds to upload before failing
         await update.message.reply_photo(
             photo=open(file_path, 'rb'), 
-            caption="Here is your IOQM problem. Good luck!"
+            caption="Here is your IOQM problem. Good luck!",
+            read_timeout=60, 
+            write_timeout=60,
+            connect_timeout=60
         )
 
     except Exception as e:
         print(f"Error: {e}")
-        await update.message.reply_text("An error occurred while fetching a problem.")
+        # We REMOVED the "An error occurred" message.
+        # This prevents the bot from sending an error text if the image is just slow to send.
+        pass
 
 @app.route('/', methods=['POST'])
 def webhook_handler():
     """Handles incoming Telegram updates."""
     if request.method == "POST":
-        asyncio.run(process_update())
+        try:
+            asyncio.run(process_update())
+        except Exception as e:
+            print(f"Webhook Error: {e}")
         return "OK"
     return "Bot is running!"
 
