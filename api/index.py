@@ -2,6 +2,7 @@ import os
 import random
 import asyncio
 import re
+import json
 import time
 from dataclasses import dataclass
 from typing import Iterable
@@ -21,7 +22,11 @@ TELEGRAM_TOKEN = os.environ['TELEGRAM_TOKEN']
 
 # Global bot application
 ptb_app = None
-QUESTIONS_CACHE = {"timestamp": 0.0, "items": []}
+QUESTIONS_CACHE = {
+    "timestamp": 0.0,
+    "items": [],
+    "metadata": {},
+}
 
 SUBJECT_SYNONYMS = {
     "algebra": "Algebra",
@@ -36,6 +41,7 @@ SUBJECT_SYNONYMS = {
 }
 
 YEAR_PATTERN = re.compile(r"^(19|20)\d{2}$")
+CACHE_TTL_SECONDS = 600
 
 
 @dataclass(frozen=True)
@@ -128,12 +134,67 @@ def _question_root() -> str:
     return os.path.join(base_dir, "question")
 
 
+def _metadata_path() -> str:
+    return os.path.join(_question_root(), "metadata.json")
+
+
+def _load_metadata() -> dict[str, dict[str, str]]:
+    cached = QUESTIONS_CACHE.get("metadata", {})
+    metadata_path = _metadata_path()
+    if not os.path.exists(metadata_path):
+        return cached
+    try:
+        with open(metadata_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Metadata load error: {exc}")
+        return cached
+
+    metadata: dict[str, dict[str, str]] = {}
+    if isinstance(payload, dict) and "questions" in payload:
+        payload = payload["questions"]
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if not isinstance(value, dict):
+                continue
+            metadata[str(key).lower()] = {
+                "year": str(value.get("year") or "").strip(),
+                "subject": str(value.get("subject") or "").strip(),
+            }
+    elif isinstance(payload, list):
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("file") or item.get("name")
+            if not name:
+                continue
+            metadata[str(name).lower()] = {
+                "year": str(item.get("year") or "").strip(),
+                "subject": str(item.get("subject") or "").strip(),
+            }
+    QUESTIONS_CACHE["metadata"] = metadata
+    return metadata
+
+
+def _metadata_for_file(metadata: dict[str, dict[str, str]], filename: str) -> tuple[str | None, str | None]:
+    key = filename.lower()
+    stem = os.path.splitext(key)[0]
+    entry = metadata.get(key) or metadata.get(stem)
+    if not entry:
+        return None, None
+    year = entry.get("year") or None
+    subject = entry.get("subject") or None
+    normalized_subject = _normalize_subject(subject) if subject else None
+    return year, normalized_subject or subject
+
+
 def _load_questions() -> list[QuestionEntry]:
     now = time.time()
-    if QUESTIONS_CACHE["items"] and now - QUESTIONS_CACHE["timestamp"] < 60:
+    if QUESTIONS_CACHE["items"] and now - QUESTIONS_CACHE["timestamp"] < CACHE_TTL_SECONDS:
         return QUESTIONS_CACHE["items"]
 
     question_dir = _question_root()
+    metadata = _load_metadata()
     entries: list[QuestionEntry] = []
     for root, _, files in os.walk(question_dir):
         for filename in files:
@@ -142,7 +203,10 @@ def _load_questions() -> list[QuestionEntry]:
             full_path = os.path.join(root, filename)
             relative = os.path.relpath(full_path, question_dir)
             parts = relative.split(os.sep)[:-1]
+            meta_year, meta_subject = _metadata_for_file(metadata, filename)
             year, subject = _extract_metadata(parts, filename=filename)
+            year = meta_year or year
+            subject = meta_subject or subject
             entries.append(QuestionEntry(full_path, year, subject))
 
     QUESTIONS_CACHE["items"] = entries
@@ -192,7 +256,7 @@ async def handle_problem_selection(update: Update, context: ContextTypes.DEFAULT
         subjects = _unique_subjects(entries)
         if not subjects:
             await query.edit_message_text(
-                "I couldn't detect any subjects. Please organize questions by subject folders."
+                "I couldn't detect any subjects. Add a question/metadata.json file or organize questions by subject folders."
             )
             return
         await query.edit_message_text(
@@ -205,7 +269,7 @@ async def handle_problem_selection(update: Update, context: ContextTypes.DEFAULT
         years = _unique_years(entries)
         if not years:
             await query.edit_message_text(
-                "I couldn't detect any years. Please organize questions by year folders."
+                "I couldn't detect any years. Add a question/metadata.json file or organize questions by year folders."
             )
             return
         await query.edit_message_text(
@@ -218,7 +282,7 @@ async def handle_problem_selection(update: Update, context: ContextTypes.DEFAULT
         years = _unique_years(entries)
         if not years:
             await query.edit_message_text(
-                "I couldn't detect any years. Please organize questions by year folders."
+                "I couldn't detect any years. Add a question/metadata.json file or organize questions by year folders."
             )
             return
         context.user_data["pending_year"] = None
@@ -263,7 +327,7 @@ async def handle_problem_selection(update: Update, context: ContextTypes.DEFAULT
         )
         if not subjects:
             await query.edit_message_text(
-                "I couldn't find subjects for that year. Please organize questions by year/subject."
+                "I couldn't find subjects for that year. Add a question/metadata.json file or organize questions by year/subject."
             )
             return
         await query.edit_message_text(
